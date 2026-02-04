@@ -1,0 +1,8 @@
+A;B;C;D;E
+A>B>C;D 
+A>B
+
+D>E>B>
+C>D >B 
+A>B>C>D>E>F>G 
+D
