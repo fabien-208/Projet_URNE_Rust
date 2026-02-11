@@ -1,1 +1,0 @@
-//fichier pour l'interface commune entre tous les algos
