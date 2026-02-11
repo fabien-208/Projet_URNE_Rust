@@ -1,4 +1,4 @@
-use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
+use crate::{VotingAlgorithm, types::{CandidateId, Election, VoteResult}};
 
 pub struct Plurality;
 
@@ -7,7 +7,7 @@ impl VotingAlgorithm for Plurality {
         return "Plurality".to_string();
     }
 
-    fn compute(&self, election: &crate::types::Election) -> crate::types::VoteResult {
+    fn compute(&self, election: &Election) -> VoteResult {
         //creer une liste de la taille de la liste des candidats
         let mut scores = vec![0; election.candidates.len()];
         //prendre les premiers éléments de chaque liste, et regarder a quel candidat il correspondent
