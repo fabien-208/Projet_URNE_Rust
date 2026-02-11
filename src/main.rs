@@ -4,9 +4,8 @@ mod parser;
 
 use vote::*;
 use types::*;
-use parser::*;
 
 fn main() {
     println!("Hello, world!");
-    let elec: Election = parser("Data_very_long.txt");
+    let elec: Election = parse("Data_very_long.txt");
 }
