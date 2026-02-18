@@ -1,7 +1,7 @@
 # 🗳️ Projet URNE (Rust)
 
 
-## 📖 À propos
+## 📖 Description
 
 Ce projet vise à modéliser et calculer informatiquement les résultats d'élections en utilisant de multiples méthodes de vote (systèmes de Condorcet, systèmes par points, votes alternatifs, etc.). Il est entièrement développé en **Rust** pour garantir des calculs rapides et une gestion de la mémoire parfaitement sécurisée.
 
@@ -25,9 +25,21 @@ Les méthodes suivantes sont actuellement implémentées :
 
 Le code source est divisé de manière logique pour faciliter l'ajout de nouvelles méthodes :
 
-* `src/types.rs` : Définition des structures de base (`Election`, `Ballot`, `VoteResult`, `CandidateId`). Les candidats sont optimisés sous forme d'ID (`usize`).
-* `src/vote/` : Cœur algorithmique. Contient un module par système de vote.
-* `src/parser.rs` : Module chargé de lire, parser et nettoyer les fichiers texte contenant les bulletins.
+```PROJET_URNE_RUST/
+├── Data/               # Fichiers d'input (Scénarios de vote)
+├── src/
+│   ├── vote/           # Logique des algorithmes de scrutin
+│   │   ├── schulze.rs
+│   │   ├── borda.rs
+│   │   ├── irv.rs
+│   │   └── ...
+│   ├── main.rs         # Point d'entrée : Orchestration du programme
+│   ├── parser.rs       # Lecture et validation des fichiers .txt
+│   └── types.rs        # Structures de données (Candidat, Bulletin, Resultat)
+├── Cargo.toml          # Dépendances et métadonnées
+└── README.md           # Documentation
+```
+
 
 ## 📊 Format des données attendu
 
@@ -41,3 +53,27 @@ C>D>B
 B 
 D>A
 ```
+
+## 🛠️ Installation
+
+Prérequis : Avoir [Rust et Cargo](https://www.rust-lang.org/) installés.
+
+1.  **Cloner le dépôt :**
+    ```bash
+    git clone https://github.com/fabien-208/Projet_URNE_Rust
+    cd PROJET_URNE_RUST
+    ```
+
+2.  **Compiler le projet (Mode Release recommandé pour la performance) :**
+    ```bash
+    cargo build --release
+    ```
+
+
+## 🚀 Utilisation
+
+L'application s'exécute en ligne de commande. Elle parse les fichiers situés dans le dossier `Data/`.
+
+### Commande basique
+```bash
+cargo run --release
