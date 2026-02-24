@@ -1,41 +1,50 @@
 use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
+use rayon::prelude::*; // 🟢 L'import magique pour le multi-threading
 
 pub struct Borda;
 
 impl Borda {
-    // Fonction publique pour récupérer les scores (utilisée par Copeland-Borda)
     pub fn get_score(election: &crate::types::Election) -> Vec<isize> {
-        // creer une liste de la taille de la liste des candidats pour les scores
-        let mut scores = vec![0; election.candidates.len()];
+        let num_candidates = election.candidates.len();
 
-        // pour chaque bulletin, attribuer des points aux candidats en fonction de leur position
-        for v in election.ballots.iter() {
-            for (pos, &c) in v.ranking.iter().enumerate() {
-                // le candidat en position pos reçoit (nombre de candidats - pos - 1) points
-                // (On convertit en isize pour être compatible avec les scores négatifs potentiels d'autres algos)
-                scores[c] += (election.candidates.len() - pos - 1) as isize;
-            }
-        }
+        // 🚀 par_iter() lance le calcul sur TOUS les cœurs de ton PC
+        let scores = election.ballots.par_iter()
+            .fold(
+                // 1. Chaque cœur crée son propre petit tableau de scores (pour éviter de se marcher dessus)
+                || vec![0isize; num_candidates], 
+                
+                // 2. Chaque cœur lit sa part des 40 millions de bulletins
+                |mut thread_scores, v| {
+                    for (pos, &c) in v.ranking.iter().enumerate() {
+                        thread_scores[c] += (num_candidates - pos - 1) as isize;
+                    }
+                    thread_scores
+                }
+            )
+            .reduce(
+                // 3. Quand les cœurs ont fini, on prépare le tableau final
+                || vec![0isize; num_candidates], 
+                
+                // 4. On additionne les tableaux de tous les cœurs ensemble
+                |mut total_scores, thread_scores| {
+                    for i in 0..num_candidates {
+                        total_scores[i] += thread_scores[i];
+                    }
+                    total_scores
+                }
+            );
+
         scores
     }
 }
 
 impl VotingAlgorithm for Borda {
-    fn name(&self) -> String {
-        return "Borda".to_string();
-    }
+    fn name(&self) -> String { "Borda".to_string() }
 
-    fn compute(&self, election: &crate::types::Election) -> crate::types::VoteResult {
-        // 1. Récupération des scores via la fonction partagée
+    fn compute(&self, election: &crate::types::Election) -> VoteResult {
         let scores = Borda::get_score(election);
-
-        // liste des candidats (indices)
         let mut ranking: Vec<CandidateId> = (0..scores.len()).collect();
-        
-        // tri de la liste des candidats par score (du plus grand au plus petit)
-        // pour garder l'ordre alphabétique en cas d'égalité, on utilise un tuple
         ranking.sort_by_key(|&i| (std::cmp::Reverse(scores[i]), &election.candidates[i]));
-
-        return VoteResult {ranking};
+        VoteResult { ranking }
     }
 }
