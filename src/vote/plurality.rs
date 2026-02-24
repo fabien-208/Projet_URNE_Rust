@@ -1,4 +1,6 @@
-use crate::{VotingAlgorithm, types::{CandidateId, Election, VoteResult}};
+use crate::types::{CandidateId, VoteResult}; // Pour les types
+use crate::vote::VotingAlgorithm;
+use crate::vote::Election;
 
 pub struct Plurality;
 

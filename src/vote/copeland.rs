@@ -3,60 +3,57 @@ use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
 pub struct Copeland;
 
 impl Copeland {
-    // Fonction publique pour récupérer les scores (utilisée par Copeland-Borda)
     pub fn get_score(election: &crate::types::Election) -> Vec<isize> {
-        // creer une liste de la taille de la liste des candidats pour les scores
         let n = election.candidates.len();
-        let mut scores = vec![0; n];
+        let mut wins = vec![vec![0; n]; n];
 
-        // comparer chaque paire de candidats (duels 1 contre 1)
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let mut i_wins = 0;
-                let mut j_wins = 0;
+        // 🚀 OPTIMISATION ULTIME : On alloue la mémoire UNE SEULE FOIS ici !
+        let mut pos = vec![usize::MAX; n];
 
-                // regarder qui gagne le duel dans chaque bulletin
-                for v in election.ballots.iter() {
-                    let pos_i = v.ranking.iter().position(|&c| c == i).unwrap_or(usize::MAX);
-                    let pos_j = v.ranking.iter().position(|&c| c == j).unwrap_or(usize::MAX);
+        for v in election.ballots.iter() {
+            // On remet juste le tableau à zéro sans redemander de la RAM à l'OS
+            pos.fill(usize::MAX);
+            
+            for (idx, &c) in v.ranking.iter().enumerate() {
+                pos[c] = idx;
+            }
 
-                    if pos_i < pos_j {
-                        i_wins += 1;
-                    } else if pos_j < pos_i {
-                        j_wins += 1;
+            // On met à jour la matrice des duels
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if pos[i] < pos[j] {
+                        wins[i][j] += 1;
+                    } else if pos[j] < pos[i] {
+                        wins[j][i] += 1;
                     }
                 }
+            }
+        }
 
-                // attribuer les points (+1 victoire, -1 defaite, 0 egalite)
-                if i_wins > j_wins {
+        let mut scores = vec![0; n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if wins[i][j] > wins[j][i] {
                     scores[i] += 1;
                     scores[j] -= 1;
-                } else if j_wins > i_wins {
+                } else if wins[j][i] > wins[i][j] {
                     scores[j] += 1;
                     scores[i] -= 1;
                 }
             }
         }
+
         scores
     }
 }
 
 impl VotingAlgorithm for Copeland {
-    fn name(&self) -> String {
-        return "Copeland".to_string();
-    }
+    fn name(&self) -> String { "Copeland".to_string() }
 
-    fn compute(&self, election: &crate::types::Election) -> crate::types::VoteResult {
-        // 1. Récupération des scores via la fonction partagée
+    fn compute(&self, election: &crate::types::Election) -> VoteResult {
         let scores = Copeland::get_score(election);
-
-        // liste des candidats
         let mut ranking: Vec<CandidateId> = (0..scores.len()).collect();
-        
-        // tri de la liste des candidats par score (du plus grand au plus petit)
-        // pour garder l'ordre alphabétique en cas d'égalité, on utilise un tuple
         ranking.sort_by_key(|&i| (std::cmp::Reverse(scores[i]), &election.candidates[i]));
-
-        return VoteResult {ranking};
+        VoteResult { ranking }
     }
 }
