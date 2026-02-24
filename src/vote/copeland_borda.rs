@@ -1,5 +1,6 @@
 use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
 use std::cmp::Reverse;
+use rayon::prelude::*;
 
 pub struct CopelandBorda;
 
@@ -11,34 +12,50 @@ impl VotingAlgorithm for CopelandBorda {
     fn compute(&self, election: &crate::types::Election) -> VoteResult {
         let n = election.candidates.len();
         
-        let mut wins = vec![vec![0; n]; n];
-        let mut borda_scores = vec![0isize; n]; // On prépare Borda
-        let mut pos = vec![usize::MAX; n];
-
-        // 🚀 L'ASTUCE EST ICI : UNE SEULE LECTURE POUR LES DEUX ALGOS
-        for v in &election.ballots {
-            pos.fill(usize::MAX);
-            
-            for (idx, &c) in v.ranking.iter().enumerate() {
-                pos[c] = idx;
-                
-                // On calcule Borda au passage, ça prend 0.0001 milliseconde de plus
-                borda_scores[c] += (n - idx - 1) as isize;
-            }
-
-            // On calcule les duels Copeland au même moment
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    if pos[i] < pos[j] {
-                        wins[i][j] += 1;
-                    } else if pos[j] < pos[i] {
-                        wins[j][i] += 1;
+        
+        let (wins, borda_scores) = election.ballots.par_iter()
+            .fold(
+                || (vec![vec![0; n]; n], vec![0isize; n]), // Etat local par cœur
+                |mut local_state, v| {
+                    let (ref mut local_wins, ref mut local_borda) = local_state;
+                    let mut pos = vec![usize::MAX; n];
+                    
+                    for (idx, &c) in v.ranking.iter().enumerate() {
+                        pos[c] = idx;
+                        // On calcule Borda au passage
+                        local_borda[c] += (n - idx - 1) as isize;
                     }
-                }
-            }
-        }
 
-        // On finalise les scores de Copeland à partir de la matrice
+                    // On calcule les duels Copeland au même moment
+                    for i in 0..n {
+                        for j in (i + 1)..n {
+                            if pos[i] < pos[j] {
+                                local_wins[i][j] += 1;
+                            } else if pos[j] < pos[i] {
+                                local_wins[j][i] += 1;
+                            }
+                        }
+                    }
+                    local_state
+                }
+            )
+            .reduce(
+                || (vec![vec![0; n]; n], vec![0isize; n]),
+                |mut total_state, local_state| {
+                    let (ref mut total_wins, ref mut total_borda) = total_state;
+                    let (local_wins, local_borda) = local_state;
+                    
+                    for i in 0..n {
+                        total_borda[i] += local_borda[i];
+                        for j in 0..n {
+                            total_wins[i][j] += local_wins[i][j];
+                        }
+                    }
+                    total_state
+                }
+            );
+
+        // On finalise les scores de Copeland à partir de la matrice fusionnée
         let mut copeland_scores = vec![0isize; n];
         for i in 0..n {
             for j in (i + 1)..n {
@@ -52,7 +69,7 @@ impl VotingAlgorithm for CopelandBorda {
             }
         }
 
-        // --- Classement Final ---
+        //Classement Final
         let mut ranking: Vec<CandidateId> = (0..n).collect();
         
         // On trie : Copeland d'abord, Borda si égalité

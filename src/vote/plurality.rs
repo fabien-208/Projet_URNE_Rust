@@ -1,26 +1,42 @@
-use crate::types::{CandidateId, VoteResult}; // Pour les types
-use crate::vote::VotingAlgorithm;
-use crate::vote::Election;
+use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
+use std::cmp::Reverse;
+use rayon::prelude::*;
 
 pub struct Plurality;
 
 impl VotingAlgorithm for Plurality {
     fn name(&self) -> String {
-        return "Plurality".to_string();
+        "Pluralité (Un tour)".to_string()
     }
 
-    fn compute(&self, election: &Election) -> VoteResult {
-        //creer une liste de la taille de la liste des candidats
-        let mut scores = vec![0; election.candidates.len()];
-        //prendre les premiers éléments de chaque liste, et regarder a quel candidat il correspondent
-        for v in election.ballots.iter() {
-            scores[v.ranking[0]]+=1;
-        }
-        //liste des candidats
-        let mut ranking: Vec<CandidateId> = (0..scores.len()).collect();
-        //tri de la liste des candidats
-        ranking.sort_by_key(|&i| std::cmp::Reverse(scores[i]));
+    fn compute(&self, election: &crate::types::Election) -> VoteResult {
+        let num_candidates = election.candidates.len();
 
-        return VoteResult {ranking};
+        //chaque cœur compte les premiers choix
+        let scores = election.ballots.par_iter()
+            .fold(
+                || vec![0usize; num_candidates],
+                |mut local_scores, ballot| {
+                    if let Some(&first_choice) = ballot.ranking.first() {
+                        local_scores[first_choice] += 1;
+                    }
+                    local_scores
+                }
+            )
+            .reduce(
+                || vec![0usize; num_candidates],
+                |mut total, local| {
+                    for i in 0..num_candidates {
+                        total[i] += local[i];
+                    }
+                    total
+                }
+            );
+
+        //Création du classement
+        let mut ranking: Vec<CandidateId> = (0..num_candidates).collect();
+        ranking.sort_by_key(|&c| (Reverse(scores[c]), &election.candidates[c]));
+
+        VoteResult { ranking }
     }
 }
