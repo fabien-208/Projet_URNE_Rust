@@ -16,5 +16,3 @@ pub mod plurality;
 pub mod schulze;
 pub mod smith_irv;
 pub mod trs;
-
-pub use plurality::Plurality;

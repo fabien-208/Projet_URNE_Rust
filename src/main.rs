@@ -41,11 +41,15 @@ fn main() {
     // On met tous tes algos dans un vecteur pour boucler dessus proprement
     let algorithms: Vec<Box<dyn VotingAlgorithm>> = vec![
         Box::new(vote::plurality::Plurality),
+        Box::new(vote::irv::IRV),
+        Box::new(vote::trs::Trs),
         Box::new(vote::borda::Borda),
+        Box::new(vote::baldwin::Baldwin),
         Box::new(vote::copeland::Copeland),
         Box::new(vote::copeland_borda::CopelandBorda),
         Box::new(vote::bucklin::Bucklin),
         // Box::new(vote::schulze::Schulze),
+        Box::new(vote::smith_irv::SmithIRV),
     ];
 
     // Exécution et Affichage des Résultats
