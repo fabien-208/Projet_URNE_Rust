@@ -48,7 +48,7 @@ fn main() {
         Box::new(vote::copeland::Copeland),
         Box::new(vote::copeland_borda::CopelandBorda),
         Box::new(vote::bucklin::Bucklin),
-        // Box::new(vote::schulze::Schulze),
+        Box::new(vote::schulze::Schulze),
         Box::new(vote::smith_irv::SmithIRV),
     ];
 
