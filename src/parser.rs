@@ -2,61 +2,78 @@ use crate::types::{Election, Ballot};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::collections::HashMap;
-use rayon::prelude::*;
 
 pub fn parse(filepath: &str) -> io::Result<Election> {
+    // Ouverture du fichier en mode lecture tamponnée (rapide)
     let file = File::open(filepath)?;
     let reader = BufReader::new(file);
-    let mut lines_iter = reader.lines();
 
-    // 1. Header (toujours séquentiel)
-    let header = lines_iter
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Fichier vide"))??;
+    // On garde une trace du numéro de ligne pour les messages d'erreur (enumerate commence à 0)
+    let mut lines = reader.lines().enumerate();
 
+    // --- ÉTAPE 1 : Lecture de l'en-tête (Ligne 1) ---
+    // On récupère la première ligne qui contient les noms des candidats
+    let header_tuple = lines.next().ok_or(io::Error::new(io::ErrorKind::InvalidData, "Fichier vide"))?;
+    let header = header_tuple.1?;
+
+    // On nettoie et on stocke les candidats
     let candidates: Vec<String> = header
-        .split(|c| matches!(c, ';' | ','))
+        .split(|c| c == ';' || c == ',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
-    // Utilisation d'une Map partagée (lecture seule donc Arc n'est pas nécessaire ici)
-    let candidate_map: HashMap<&str, usize> = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, name)| (name.as_str(), i))
-        .collect();
+    // Création d'un dictionnaire (HashMap) pour trouver l'index d'un candidat instantanément
+    let mut candidate_map: HashMap<&str, usize> = HashMap::new();
+    for (i, name) in candidates.iter().enumerate() {
+        candidate_map.insert(name, i);
+    }
 
-    // 2. Chargement des lignes en mémoire
-    // On collecte tout pour que Rayon puisse diviser le travail
-    let raw_lines: Vec<String> = lines_iter.collect::<Result<Vec<_>, _>>()?;
+    // On prépare le stockage des bulletins. 
+    // On met une capacité initiale raisonnable pour éviter trop de réallocations,
+    // mais pas trop grosse pour ne pas saturer la RAM si le fichier est petit.
+    let mut ballots: Vec<Ballot> = Vec::with_capacity(1_000_000); 
 
-    // 3. Parsing parallèle avec Rayon
-    let ballots: Vec<Ballot> = raw_lines
-        .par_iter() // C'est ici que la magie opère
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() { return None; }
+    // --- ÉTAPE 2 : Lecture des votes (Boucle Optimisée) ---
+    for (line_index, line_result) in lines {
+        let line_content = line_result?;
+        let trimmed_line = line_content.trim();
+        
+        // Si la ligne est vide, on passe à la suivante
+        if trimmed_line.is_empty() { continue; }
 
-            let mut ranking = Vec::with_capacity(candidates.len());
-            let mut seen = vec![false; candidates.len()]; // Un par thread, alloué automatiquement
+        let mut ranking: Vec<usize> = Vec::with_capacity(candidates.len());
+        
+        // OPTIMISATION : On itère directement sur le split (lazy iterator).
+        // Cela évite de créer un tableau temporaire de Strings pour chaque ligne.
+        // On accepte '>', ';' et ',' comme séparateurs.
+        for part in trimmed_line.split(|c| c == '>' || c == ';' || c == ',') {
+            let name = part.trim();
+            
+            // GESTION DES ERREURS DE SYNTAXE (ex: "A>>B" ou "A> >B")
+            // Si un segment est vide, ce n'est pas grave, on l'ignore silencieusement.
+            if name.is_empty() { continue; }
 
-            for part in trimmed.split(|c| matches!(c, '>' | ';' | ',')) {
-                let name = part.trim();
-                if name.is_empty() { return None; }
-
-                match candidate_map.get(name) {
-                    Some(&index) if !seen[index] => {
-                        seen[index] = true;
-                        ranking.push(index);
-                    }
-                    _ => return None, // Invalide ou doublon
+            if let Some(&index) = candidate_map.get(name) {
+                // GESTION DES DOUBLONS (ex: "A>B>A")
+                // On vérifie si le candidat est déjà dans le classement de ce bulletin.
+                // S'il y est déjà, on ignore cette répétition.
+                if !ranking.contains(&index) {
+                    ranking.push(index);
                 }
+            } else {
+                // GESTION DES INCONNUS (ex: Vote pour "Toto")
+                // C'est la seule erreur qui mérite d'être signalée à l'utilisateur.
+                eprintln!("⚠️ Ligne {} : Candidat inconnu '{}' ignoré.", line_index + 1, name);
             }
+        }
 
-            if ranking.is_empty() { None } else { Some(Ballot { ranking }) }
-        })
-        .collect();
+        // Si le bulletin contient au moins un vote valide, on l'enregistre
+        if !ranking.is_empty() {
+            ranking.shrink_to_fit(); 
+            ballots.push(Ballot { ranking });
+        }
+    }
 
     Ok(Election { candidates, ballots })
 }
