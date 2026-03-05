@@ -76,4 +76,5 @@ L'application s'exécute en ligne de commande. Elle parse les fichiers situés d
 
 ### Commande basique
 ```bash
-cargo run --release
+cargo run --release -- Data/Data.txt
+```
