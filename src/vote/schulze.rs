@@ -103,40 +103,65 @@ impl VotingAlgorithm for Schulze {
 
     fn compute(&self, election: &Election) -> VoteResult {
 
-        let smith = smith_set(election);
-        let wins = pairwise_matrix(election);
+        let n = election.candidates.len();
 
-        let mut edges = Vec::new();
+        let wins = pairwise_matrix(election);
+        let smith = smith_set(election);
+
+        let mut p = vec![vec![0usize; n]; n];
+
+        // initialisation
+        for &i in &smith {
+            for &j in &smith {
+
+                if i == j { continue; }
+
+                if wins[i][j] > wins[j][i] {
+                    p[i][j] = wins[i][j] - wins[j][i];
+                }
+            }
+        }
+
+        // Floyd–Warshall version Schulze
+        for &k in &smith {
+            for &i in &smith {
+                if i == k { continue; }
+
+                for &j in &smith {
+                    if j == i || j == k { continue; }
+
+                    let val = std::cmp::min(p[i][k], p[k][j]);
+                    if val > p[i][j] {
+                        p[i][j] = val;
+                    }
+                }
+            }
+        }
+
+        // score Schulze
+        let mut scores = vec![0usize; n];
 
         for &i in &smith {
             for &j in &smith {
-                if i >= j { continue; }
 
-                let margin = wins[i][j] as isize - wins[j][i] as isize;
+                if i == j { continue; }
 
-                if margin > 0 {
-                    edges.push((i, j, margin));
-                } else if margin < 0 {
-                    edges.push((j, i, -margin));
+                if p[i][j] > p[j][i] {
+                    scores[i] += 1;
                 }
             }
         }
 
-        edges.sort_by_key(|e| e.2);
+        // classement
+        let mut ranking: Vec<CandidateId> = (0..n).collect();
 
-        while !edges.is_empty() {
+        ranking.sort_by_key(|&c|
+            (
+                std::cmp::Reverse(scores[c]),
+                &election.candidates[c]
+            )
+        );
 
-            let min_margin = edges[0].2;
-            edges.retain(|e| e.2 != min_margin);
-
-            for &candidate in &smith {
-                let defeated = edges.iter().any(|e| e.1 == candidate);
-                if !defeated {
-                    return VoteResult { ranking: vec![candidate] };
-                }
-            }
-        }
-
-        panic!("No winner found");
+        VoteResult { ranking }
     }
 }

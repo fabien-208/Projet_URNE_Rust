@@ -121,19 +121,26 @@ impl VotingAlgorithm for SmithIRV {
 
     fn compute(&self, election: &Election) -> VoteResult {
 
-        let mut smith = smith_set(election);
         let wins = pairwise_matrix(election);
-        let n = election.candidates.len();
+        let mut smith = smith_set(election);
+
+        let mut eliminated = Vec::new();
 
         loop {
 
             if let Some(w) = condorcet_winner(&wins, &smith) {
-                return VoteResult { ranking: vec![w] };
+
+                let mut ranking = vec![w];
+
+                eliminated.reverse();
+                ranking.extend(eliminated);
+
+                return VoteResult { ranking };
             }
 
             let scores = election.ballots.par_iter()
                 .fold(
-                    || vec![0usize; n],
+                    || vec![0usize; election.candidates.len()],
                     |mut local, ballot| {
                         for &c in &ballot.ranking {
                             if smith.contains(&c) {
@@ -145,21 +152,22 @@ impl VotingAlgorithm for SmithIRV {
                     }
                 )
                 .reduce(
-                    || vec![0usize; n],
+                    || vec![0usize; election.candidates.len()],
                     |mut acc, local| {
-                        for i in 0..n {
+                        for i in 0..acc.len() {
                             acc[i] += local[i];
                         }
                         acc
                     }
                 );
 
-            let loser = smith.par_iter()
+            let loser = smith.iter()
                 .min_by_key(|&&c| (scores[c], &election.candidates[c]))
                 .cloned()
                 .unwrap();
 
             smith.retain(|&c| c != loser);
+            eliminated.push(loser);
         }
     }
 }
