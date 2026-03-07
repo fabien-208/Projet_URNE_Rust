@@ -1,5 +1,5 @@
 // l'id des candidats (leur position dans la liste de base)
-pub type CandidateId = usize;
+pub type CandidateId = u8;
 
 // les preferences des votants
 #[derive(Debug, Clone)]

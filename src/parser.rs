@@ -1,62 +1,51 @@
-use crate::types::{Election, Ballot};
+use crate::types::{Election, Ballot, CandidateId};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::collections::HashMap;
-use rayon::prelude::*;
 
 pub fn parse(filepath: &str) -> io::Result<Election> {
     let file = File::open(filepath)?;
     let reader = BufReader::new(file);
-    let mut lines_iter = reader.lines();
+    let mut lines = reader.lines().enumerate();
 
-    // 1. Header (toujours séquentiel)
-    let header = lines_iter
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Fichier vide"))??;
+    let header_tuple = lines.next().ok_or(io::Error::new(io::ErrorKind::InvalidData, "Fichier vide"))?;
+    let header = header_tuple.1?;
 
-    let candidates: Vec<String> = header
-        .split(|c| matches!(c, ';' | ','))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let candidates: Vec<String> = header.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
 
-    // Utilisation d'une Map partagée (lecture seule donc Arc n'est pas nécessaire ici)
-    let candidate_map: HashMap<&str, usize> = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, name)| (name.as_str(), i))
-        .collect();
+    let mut candidate_map: HashMap<&str, usize> = HashMap::new();
+    for (i, name) in candidates.iter().enumerate() {
+        candidate_map.insert(name, i);
+    }
 
-    // 2. Chargement des lignes en mémoire
-    // On collecte tout pour que Rayon puisse diviser le travail
-    let raw_lines: Vec<String> = lines_iter.collect::<Result<Vec<_>, _>>()?;
+    // On alloue la capacité direct pour éviter les copies en RAM
+    let mut ballots: Vec<Ballot> = Vec::with_capacity(50_000_000); 
 
-    // 3. Parsing parallèle avec Rayon
-    let ballots: Vec<Ballot> = raw_lines
-        .par_iter() // C'est ici que la magie opère
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() { return None; }
+    for (_line_index, line_result) in lines {
+        let line_content = line_result?;
+        let trimmed_line = line_content.trim();
+        if trimmed_line.is_empty() { continue; }
 
-            let mut ranking = Vec::with_capacity(candidates.len());
-            let mut seen = vec![false; candidates.len()]; // Un par thread, alloué automatiquement
+        let mut ranking: Vec<CandidateId> = Vec::with_capacity(candidates.len());
+        let mut is_valid = true;
 
-            for part in trimmed.split(|c| matches!(c, '>' | ';' | ',')) {
-                let name = part.trim();
-                if name.is_empty() { return None; }
+        for part in trimmed_line.split('>') {
+            let name = part.trim();
+            if name.is_empty() { is_valid = false; break; }
 
-                match candidate_map.get(name) {
-                    Some(&index) if !seen[index] => {
-                        seen[index] = true;
-                        ranking.push(index);
-                    }
-                    _ => return None, // Invalide ou doublon
-                }
+            if let Some(&index) = candidate_map.get(name) {
+                let id = index as u8; // 🎯 Conversion ici
+                if ranking.contains(&id) { is_valid = false; break; }
+                ranking.push(id);
+            } else {
+                is_valid = false; break;
             }
+        }
 
-            if ranking.is_empty() { None } else { Some(Ballot { ranking }) }
-        })
-        .collect();
-
+        if is_valid && !ranking.is_empty() {
+            ranking.shrink_to_fit();
+            ballots.push(Ballot { ranking });
+        }
+    }
     Ok(Election { candidates, ballots })
 }

@@ -5,73 +5,62 @@ use rayon::prelude::*;
 pub struct Trs;
 
 impl VotingAlgorithm for Trs {
-    fn name(&self) -> String {
-        "Two-Round System (2 Tours)".to_string()
-    }
+    fn name(&self) -> String { "TRS".to_string() }
 
     fn compute(&self, election: &crate::types::Election) -> VoteResult {
         let num_candidates = election.candidates.len();
 
-        // TOUR 1 : On compte les premiers choix (comme Plurality)
+        // --- TOUR 1 ---
         let round1_scores = election.ballots.par_iter()
             .fold(
                 || vec![0usize; num_candidates],
                 |mut local, ballot| {
                     if let Some(&first) = ballot.ranking.first() {
-                        local[first] += 1;
+                        local[first as usize] += 1;
                     }
                     local
-                }
-            )
+                })
+
             .reduce(
-                || vec![0usize; num_candidates],
-                |mut total, local| {
-                    for i in 0..num_candidates { total[i] += local[i]; }
-                    total
-                }
-            );
+                || vec![0; num_candidates],
+                |mut total_wins, local_wins| {
+                    for i in 0..num_candidates { total_wins[i] += local_wins[i]; }
+                    total_wins
+                });
 
-        let mut round1_ranking: Vec<CandidateId> = (0..num_candidates).collect();
-        round1_ranking.sort_by_key(|&c| (Reverse(round1_scores[c]), &election.candidates[c]));
+        let mut round1_ranking: Vec<CandidateId> = (0..num_candidates).map(|i| i as u8).collect();
+        round1_ranking.sort_by_key(|&c| (Reverse(round1_scores[c as usize]), &election.candidates[c as usize]));
 
-        // Si le 1er a la majorité absolue (> 50%), il gagne direct (pas de Tour 2)
-        if round1_scores[round1_ranking[0]] * 2 > election.ballots.len() {
+        // Majorité absolue ?
+        if round1_scores[round1_ranking[0] as usize] * 2 > election.ballots.len() {
             return VoteResult { ranking: round1_ranking };
         }
 
-        // Duel face-à-face entre les deux premiers du Tour 1
-        let finalist1 = round1_ranking[0];
-        let finalist2 = round1_ranking[1];
-
-        // On refait un passage parallèle rapide pour le face-à-face
-        let (score_f1, score_f2) = election.ballots.par_iter()
-            .fold(
-                || (0usize, 0usize), // (Score Finaliste 1, Score Finaliste 2)
-                |mut local_scores, ballot| {
-                    // On parcourt le bulletin de gauche à droite
-                    for &c in &ballot.ranking {
-                        if c == finalist1 {
-                            local_scores.0 += 1;
-                            break; // Dès qu'on voit l'un des deux, c'est lui qui prend la voix
-                        } else if c == finalist2 {
-                            local_scores.1 += 1;
-                            break;
-                        }
-                    }
-                    local_scores
+        // --- TOUR 2 ---
+        let c1 = round1_ranking[0];
+        let c2 = round1_ranking[1];
+        
+        let (score1, score2) = election.ballots.par_iter()
+            .fold(|| (0, 0), |(mut s1, mut s2), ballot| {
+                for &c in &ballot.ranking {
+                    if c == c1 { s1 += 1; break; }
+                    if c == c2 { s2 += 1; break; }
                 }
-            )
-            .reduce(
-                || (0, 0),
-                |total, local| (total.0 + local.0, total.1 + local.1)
-            );
+                (s1, s2)
+            })
+            .reduce(|| (0, 0), |(a1, a2), (b1, b2)| (a1 + b1, a2 + b2));
 
-        // Classement Final
-        let mut final_ranking = round1_ranking.clone();
-        // Si le finaliste 2 bat le finaliste 1, on inverse leurs places dans le classement
-        if score_f2 > score_f1 {
-            final_ranking[0] = finalist2;
-            final_ranking[1] = finalist1;
+        let winner = if score1 > score2 { c1 }
+        else if score2 > score1 { c2 }
+        else if election.candidates[c1 as usize] < election.candidates[c2 as usize] { c1 }
+        else { c2 };
+        
+        let loser = if winner == c1 { c2 } else { c1 };
+        
+        let mut final_ranking = vec![winner, loser];
+        // Ajouter les autres éliminés
+        for &c in round1_ranking.iter().skip(2) {
+            final_ranking.push(c);
         }
 
         VoteResult { ranking: final_ranking }

@@ -5,67 +5,55 @@ use rayon::prelude::*;
 pub struct Bucklin;
 
 impl VotingAlgorithm for Bucklin {
-    fn name(&self) -> String {
-        "Bucklin".to_string()
-    }
+    fn name(&self) -> String { "Bucklin".to_string() }
 
     fn compute(&self, election: &crate::types::Election) -> VoteResult {
         let num_candidates = election.candidates.len();
         let total_votes = election.ballots.len();
-        let majority_threshold = total_votes / 2; // Majorité absolue (> 50%)
+        let majority = (total_votes / 2) + 1;
 
-        //Chaque cœur compte sa part des bulletins
-        let rank_counts = election.ballots.par_iter()
-            .fold(
-                || vec![vec![0; num_candidates]; num_candidates],
-                |mut local_counts, ballot| {
-                    for (rank, &candidate) in ballot.ranking.iter().enumerate() {
-                        if rank < num_candidates {
-                            local_counts[rank][candidate] += 1;
-                        }
+        let counts_per_rank = election.ballots.par_iter()
+            .fold(|| vec![vec![0usize; num_candidates]; num_candidates], |mut local, ballot| {
+                for (rank, &candidate) in ballot.ranking.iter().enumerate() {
+                    if rank < num_candidates {
+                        local[rank][candidate as usize] += 1; // 👈 Fix
                     }
-                    local_counts
                 }
-            )
-            .reduce(
-                || vec![vec![0; num_candidates]; num_candidates],
-                |mut total_counts, local_counts| {
-                    for r in 0..num_candidates {
-                        for c in 0..num_candidates {
-                            total_counts[r][c] += local_counts[r][c];
-                        }
-                    }
-                    total_counts
+                local
+            })
+            .reduce(|| vec![vec![0; num_candidates]; num_candidates], |mut t, l| {
+                for r in 0..num_candidates {
+                    for c in 0..num_candidates { t[r][c] += l[r][c]; }
                 }
-            );
+                t
+            });
 
-        // Tableau pour stocker les scores cumulés
-        let mut scores = vec![0; num_candidates];
+        let mut scores = vec![0usize; num_candidates];
+        let mut round_reached = vec![num_candidates; num_candidates];
 
-        // On déroule l'algorithme : round par round (rang 0, puis rang 1, etc.)
-        for rank in 0..num_candidates {
-            let mut majority_reached = false;
-
-            for c in 0..num_candidates {
-                scores[c] += rank_counts[rank][c];
-                
-                if scores[c] > majority_threshold {
-                    majority_reached = true;
+        for c in 0..num_candidates {
+            let mut total = 0;
+            for r in 0..num_candidates {
+                total += counts_per_rank[r][c];
+                if total >= majority {
+                    scores[c] = total; // Score au tour gagnant
+                    round_reached[c] = r; // Quel tour ?
+                    break;
                 }
-            }
-
-            if majority_reached {
-                break;
+                // Si pas de majorité, le score est le total cumulé final
+                scores[c] = total; 
             }
         }
 
-        // Création du classement final
-        let mut ranking: Vec<CandidateId> = (0..num_candidates).collect();
-        
-        ranking.sort_by_key(|&c| (
-            Reverse(scores[c]),      // Le plus grand score d'abord
-            &election.candidates[c]  // Ordre alphabétique en cas d'égalité absolue
-        ));
+        let mut ranking: Vec<CandidateId> = (0..num_candidates).map(|i| i as u8).collect(); // 👈 Fix
+        ranking.sort_by_key(|&c| {
+            let cu = c as usize;
+            (
+                round_reached[cu],           // Plus petit tour d'abord
+                Reverse(scores[cu]),         // Plus grand score ensuite
+                &election.candidates[cu]     // Alpha
+            )
+        });
 
         VoteResult { ranking }
     }
