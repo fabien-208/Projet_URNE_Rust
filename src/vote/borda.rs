@@ -40,8 +40,9 @@ impl VotingAlgorithm for Borda {
 
         let scores = election.ballots.par_iter()
             .fold(|| vec![0isize; num_candidates], |mut thread_scores, ballot| {
+                let m = ballot.ranking.len(); // 🎯 FIX : 'm' est la taille de CE bulletin
                 for (pos, &c) in ballot.ranking.iter().enumerate() {
-                    thread_scores[c as usize] += (num_candidates - pos - 1) as isize; // 👈 Fix
+                    thread_scores[c as usize] += (m - pos) as isize;
                 }
                 thread_scores
             })

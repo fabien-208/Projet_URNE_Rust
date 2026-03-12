@@ -1,119 +1,131 @@
-use crate::{types::VoteResult, vote::VotingAlgorithm};use rayon::prelude::*;
+use crate::{types::{CandidateId, Election, VoteResult}, vote::VotingAlgorithm};
+use rayon::prelude::*;
+
+pub fn pairwise_matrix(election: &Election) -> Vec<Vec<usize>> {
+    let n = election.candidates.len();
+    election.ballots.par_iter()
+        .fold(
+            || vec![vec![0usize; n]; n],
+            |mut local, ballot| {
+                let mut pos = vec![usize::MAX; n];
+                for (i, &c) in ballot.ranking.iter().enumerate() { pos[c as usize] = i; }
+                for i in 0..n {
+                    for j in (i + 1)..n {
+                        if pos[i] < pos[j] { local[i][j] += 1; } 
+                        else if pos[j] < pos[i] { local[j][i] += 1; }
+                    }
+                }
+                local
+            }
+        )
+        .reduce(|| vec![vec![0usize; n]; n], |mut acc, local| {
+            for i in 0..n { for j in 0..n { acc[i][j] += local[i][j]; } }
+            acc
+        })
+}
+
+pub fn smith_set(election: &Election) -> Vec<CandidateId> {
+    let n = election.candidates.len();
+    let wins = pairwise_matrix(election);
+
+    let mut copeland = vec![0isize; n];
+    for i in 0..n {
+        for j in 0..n {
+            if i == j { continue; }
+            if wins[i][j] > wins[j][i] { copeland[i] += 1; }
+            else if wins[j][i] > wins[i][j] { copeland[i] -= 1; }
+        }
+    }
+
+    let max_score = (0..n).map(|i| copeland[i]).max().unwrap();
+    let mut smith: Vec<bool> = (0..n).map(|i| copeland[i] == max_score).collect();
+
+    // 🎯 FIX : Utilisation de `>=` pour inclure les égalités parfaites
+    loop {
+        let mut added = false;
+        for i in 0..n {
+            if smith[i] { continue; }
+            for j in 0..n {
+                if smith[j] && wins[i][j] >= wins[j][i] {
+                    smith[i] = true;
+                    added = true;
+                    break;
+                }
+            }
+        }
+        if !added { break; }
+    }
+    (0..n).filter(|&i| smith[i]).map(|i| i as u8).collect()
+}
+
+pub fn condorcet_winner(wins: &Vec<Vec<usize>>, candidates: &[CandidateId]) -> Option<CandidateId> {
+    candidates.par_iter().cloned().find_any(|&i| {
+        for &j in candidates {
+            if i == j { continue; }
+            if wins[i as usize][j as usize] <= wins[j as usize][i as usize] { return false; }
+        }
+        true
+    })
+}
 
 pub struct SmithIRV;
 
 impl VotingAlgorithm for SmithIRV {
     fn name(&self) -> String { "Smith+IRV".to_string() }
 
-    fn compute(&self, election: &crate::types::Election) -> VoteResult {
+    fn compute(&self, election: &Election) -> VoteResult {
         let n = election.candidates.len();
+        let wins = pairwise_matrix(election);
+        let mut smith = smith_set(election);
+        let mut eliminated = Vec::new();
 
-        //Matrice des duels
-        let wins = election.ballots.par_iter()
-            .fold(
-                || vec![vec![0usize; n]; n],
-                |mut local_wins, ballot| {
-                    let mut pos = vec![usize::MAX; n];
-                    for (i, &c) in ballot.ranking.iter().enumerate() { pos[c as usize] = i; } // 👈 Fix
-                    for i in 0..n {
-                        for j in (i+1)..n {
-                            if pos[i] < pos[j] { local_wins[i][j] += 1; }
-                            else if pos[j] < pos[i] { local_wins[j][i] += 1; }
-                        }
-                    }
-                    local_wins
-            })
-            .reduce(
-                || vec![vec![0; n]; n],
-                |mut total_wins, local_wins| {
-                    for i in 0..n { for j in 0..n { total_wins[i][j] += local_wins[i][j]; } }
-                    total_wins
-                });
-
-        //Ensemble de Smith (simplifié)
-        let mut adj = vec![vec![false; n]; n];
-        for i in 0..n {
-            for j in 0..n {
-                if i != j && wins[i][j] > wins[j][i] { adj[i][j] = true; }
+        loop {
+            // 🎯 FIX : On vérifie si un gagnant de Condorcet émerge après chaque élimination
+            if let Some(w) = condorcet_winner(&wins, &smith) {
+                let mut ranking = vec![w];
+                eliminated.reverse();
+                ranking.extend(eliminated);
+                for i in 0..n {
+                    let id = i as u8;
+                    if !ranking.contains(&id) { ranking.push(id); }
+                }
+                return VoteResult { ranking };
             }
-        }
-        let mut reach = adj.clone();
-        for k in 0..n {
-            for i in 0..n {
-                for j in 0..n { reach[i][j] = reach[i][j] || (reach[i][k] && reach[k][j]); }
-            }
-        }
-        let mut smith_members = Vec::new();
-        for i in 0..n {
-            let mut dominates_all = true;
-            for j in 0..n {
-                if reach[j][i] && !reach[i][j] { dominates_all = false; break; }
-            }
-            if dominates_all { smith_members.push(i); }
-        }
 
-        //IRV sur Smith
-        let mut active = vec![false; n];
-        for &c in &smith_members { active[c] = true; }
-        if smith_members.is_empty() { for i in 0..n { active[i] = true; } }
-
-        let mut elimination_order = Vec::new();
-        let mut remaining = n; // Simplification pour éviter boucle infinie
-
-        while remaining > 0 {
             let scores = election.ballots.par_iter()
-                .fold(|| vec![0usize; n], |mut l, b| {
-                    for &c in &b.ranking {
-                        let cu = c as usize;
-                        if active[cu] {
-                            l[cu] += 1;
+                .fold(|| vec![0usize; n], |mut local, ballot| {
+                    for &c in &ballot.ranking {
+                        if smith.contains(&c) {
+                            local[c as usize] += 1;
                             break;
                         }
                     }
-                    l
+                    local
                 })
-                .reduce(|| vec![0; n], |mut t, l| {
-                    for i in 0..n { t[i] += l[i]; }
-                    t
+                .reduce(|| vec![0usize; n], |mut acc, local| {
+                    for i in 0..n { acc[i] += local[i]; }
+                    acc
                 });
 
-            let mut min_val = usize::MAX;
-            let mut loser = None;
-            let mut found_active = false;
+            // 🎯 FIX : Élimination du plus loin dans l'alphabet en cas d'égalité (Reverse)
+            let loser = smith.iter()
+                .max_by_key(|&&c| (std::cmp::Reverse(scores[c as usize]), &election.candidates[c as usize]))
+                .cloned()
+                .unwrap();
 
-            for i in 0..n {
-                if active[i] {
-                    found_active = true;
-                    if scores[i] < min_val {
-                        min_val = scores[i];
-                        loser = Some(i);
-                    } else if scores[i] == min_val {
-                        loser = Some(i);
-                    }
+            smith.retain(|&c| c != loser);
+            eliminated.push(loser);
+
+            if smith.len() == 1 {
+                let mut ranking = vec![smith[0]];
+                eliminated.reverse();
+                ranking.extend(eliminated);
+                for i in 0..n {
+                    let id = i as u8;
+                    if !ranking.contains(&id) { ranking.push(id); }
                 }
-            }
-
-            if let Some(l) = loser {
-                active[l] = false;
-                elimination_order.push(l as u8);
-                remaining -= 1;
-            } else {
-                if !found_active { break; }
-                // Cas rare de blocage, on vide tout
-                for i in 0..n { if active[i] { elimination_order.push(i as u8); } }
-                break;
+                return VoteResult { ranking };
             }
         }
-
-        // Compléter avec ceux hors du Smith Set (s'ils n'ont pas été traités)
-        for i in 0..n {
-            let iu = i as u8;
-            if !elimination_order.contains(&iu) {
-                elimination_order.insert(0, iu);
-            }
-        }
-
-        elimination_order.reverse();
-        VoteResult { ranking: elimination_order }
     }
 }

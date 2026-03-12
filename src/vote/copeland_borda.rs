@@ -1,6 +1,7 @@
 use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
 use rayon::prelude::*;
 
+/// Implémentation de la méthode de Copeland avec le score de Borda comme mécanisme de départage.
 pub struct CopelandBorda;
 
 impl VotingAlgorithm for CopelandBorda {
@@ -18,6 +19,7 @@ impl VotingAlgorithm for CopelandBorda {
                     for (idx, &c) in ballot.ranking.iter().enumerate() {
                         let cu = c as usize;
                         pos[cu] = idx;
+                        // Attribution des points Borda
                         local_borda[cu] += (n - idx - 1) as isize;
                     }
                     for i in 0..n {
@@ -39,7 +41,7 @@ impl VotingAlgorithm for CopelandBorda {
                     (tw, tb)
                 });
 
-        // Calcul des scores de Copeland
+        // Calcul des scores finaux de Copeland
         let mut copeland_scores = vec![0isize; n];
         for i in 0..n {
             for j in 0..n {

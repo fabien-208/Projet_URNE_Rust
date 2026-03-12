@@ -1,6 +1,8 @@
 use crate::{VotingAlgorithm, types::{CandidateId, VoteResult}};
 use rayon::prelude::*;
 
+/// Implémentation de la méthode de Copeland.
+/// Comptabilise les victoires et matchs nuls lors de confrontations paires.
 pub struct Copeland;
 
 impl VotingAlgorithm for Copeland {
@@ -10,6 +12,7 @@ impl VotingAlgorithm for Copeland {
         let n = election.candidates.len();
 
         // Division des calculs de la matrice
+        // Matrice des duels générée avec fold et reduce
         let wins = election.ballots.par_iter()
             .fold(
                 || vec![vec![0usize; n]; n],
@@ -34,7 +37,7 @@ impl VotingAlgorithm for Copeland {
                     total_wins
                 });
 
-        // Calcul des scores de chaque candidat
+        // Calcul des scores de chaque candidat (2 points pour une victoire, 1 pour une égalité)
         let mut scores = vec![0isize; n];
         for i in 0..n {
             for j in 0..n {
@@ -50,7 +53,7 @@ impl VotingAlgorithm for Copeland {
             }
         }
 
-        // Tri des candidats par score
+        // Tri des candidats par score décroissant et ordre alphabétique en cas d'égalité
         let mut ranking: Vec<CandidateId> = (0..scores.len()).map(|i| i as u8).collect();
         ranking.sort_by_key(|&i| (std::cmp::Reverse(scores[i as usize]), &election.candidates[i as usize]));
 

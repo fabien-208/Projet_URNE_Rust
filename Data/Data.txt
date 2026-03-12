@@ -4,6 +4,4 @@ A>D>E>B
 B>A>D>E
 C>D>B>A>E
 C>D>B
-D>E>A
-E>C
-B
+D

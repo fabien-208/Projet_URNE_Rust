@@ -5,39 +5,30 @@ mod vote;
 use std::env;
 use std::process;
 use crate::vote::VotingAlgorithm;
-use std::time::Instant;
 
 fn main() {
     // Gestion des Arguments
     let args: Vec<String> = env::args().collect();
 
-    // Le sujet demande d'afficher une erreur explicite sur la sortie d'erreur
+    // Le sujet demande d'afficher une erreur explicite sur la sortie d'erreur (stderr)
     if args.len() < 2 {
-        eprintln!("❌ Erreur : Veuillez spécifier un fichier de données.");
-        eprintln!("Usage : cargo run --release -- <fichier_donnees>");
+        eprintln!("Erreur : Veuillez spécifier un fichier de données.");
         process::exit(1);
     }
 
     let filename = &args[1];
-    
-    // Info pour le développeur sur stderr
-    eprintln!("📂 Lecture du fichier : {}", filename);
 
-    // Parsing
+    // Parsing : S'il y a la moindre erreur d'entrée, on l'affiche sur stderr et on coupe tout.
+    // AUCUN println! (stdout) ne sera exécuté. Le programme ne panique pas.
     let election = match parser::parse(filename) {
-        Ok(e) => {
-            eprintln!("✅ Chargé : {} candidats, {} bulletins.", e.candidates.len(), e.ballots.len());
-            e
-        },
+        Ok(e) => e,
         Err(e) => {
-            // Message d'erreur explicite requis
-            eprintln!("❌ Erreur fatale lecture fichier : {}", e);
+            eprintln!("Erreur d'entrée : {}", e);
             process::exit(1);
         }
     };
 
-    //  Liste des Algorithmes
-    //  L'ordre doit être respecté : Plurality, TRS, IRV, Borda, Bucklin, Baldwin, Copeland, Copeland+Borda, Schulze, Smith+IRV
+    //  Liste des Algorithmes dans l'ordre strict imposé par le projet
     let algorithms: Vec<Box<dyn VotingAlgorithm>> = vec![
         Box::new(vote::plurality::Plurality),
         Box::new(vote::trs::Trs),
@@ -51,26 +42,14 @@ fn main() {
         Box::new(vote::smith_irv::SmithIRV),
     ];
 
-    // Exécution
+    // Exécution 100% silencieuse
     for algo in algorithms {
-        // On chronomètre pour la frime
-        let start = Instant::now();
-        
         let result = algo.compute(&election);
         
-        let duration = start.elapsed();
-        eprintln!("   ⏱  {} calculé en {:?}", algo.name(), duration);
-
-        // SORTIE OFFICIELLE-
-        // Syntaxe : "[nom]: [vainqueur]\n"
-
-        
+        // SORTIE OFFICIELLE (stdout)
+        // Syntaxe strictement respectée : "[nom]: [vainqueur]\n"
         if let Some(&winner_id) = result.ranking.first() {
-            // On récupère le nom du candidat via son ID
             println!("{}: {}", algo.name(), election.candidates[winner_id as usize]);
-        } else {
-            // Cas théorique impossible avec un fichier valide non-vide
-            eprintln!(" Pas de vainqueur trouvé pour {}", algo.name());
         }
     }
 }

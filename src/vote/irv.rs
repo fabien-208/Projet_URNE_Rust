@@ -1,6 +1,8 @@
 use crate::{types::{Election, VoteResult}, vote::VotingAlgorithm};
 use rayon::prelude::*;
 
+/// Implémente le Vote Alternatif (Instant Runoff Voting - IRV).
+/// Élimination successive du candidat recevant le moins de premières places.
 pub struct IRV;
 
 impl VotingAlgorithm for IRV {
@@ -10,16 +12,16 @@ impl VotingAlgorithm for IRV {
         let nb_candidats = election.candidates.len();
         // true = en course / false = éliminé
         let mut active = vec![true; nb_candidats];
-        //on va empiler les candidats éliminés dans l'ordre d'élimination, le gagnant sera le dernier
+        // on va empiler les candidats éliminés dans l'ordre d'élimination, le gagnant sera le dernier
         let mut elimination_order = Vec::with_capacity(nb_candidats);
 
-        //Boucle d'élimination
-        for _ in 0..(nb_candidats - 1) { //on s arrete quand il ne reste plus qu'un candidat
+        // Boucle d'élimination
+        for _ in 0..(nb_candidats - 1) { // on s arrete quand il ne reste plus qu'un candidat
             let scores = election.ballots.par_iter()
                 .fold(
                     || vec![0usize; nb_candidats],
                     |mut local_wins, ballot| {
-                        // on cherche le premier choix valide du bulletin
+                        // on cherche le premier choix valide du bulletin parmi les candidats toujours en lice
                         for &c in &ballot.ranking {
                             if active[c as usize] {
                                 local_wins[c as usize] += 1;
@@ -37,7 +39,7 @@ impl VotingAlgorithm for IRV {
                         total_wins
                     });
 
-            //trouver le candidat avec le moins de votes parmi les actifs
+            // trouver le candidat avec le moins de votes parmi les actifs
             let mut min_score = usize::MAX;
             let mut candidate_to_eliminate = None;
 
@@ -53,6 +55,7 @@ impl VotingAlgorithm for IRV {
                 }
             }
 
+            // Exécution de l'élimination
             if let Some(loser) = candidate_to_eliminate {
                 active[loser] = false;
                 elimination_order.push(loser as u8);
